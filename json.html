@@ -1,0 +1,192 @@
+﻿<!DOCTYPE html>
+<!--
+
+I've attached two JSON datasets. The "sample.json" is a series of simplified "world" objects.
+The radius value in each world object is in meters, and it represents the radial size of the
+world itself, using the "loc" point (formatted as lon/lat) as the center. Some worlds have
+a "timestart" and "timeend" which is the time in which the world is active.
+Otherwise, the world is always active.
+
+The "user.json" is a mock user's current information (their lon/lat location "userloc",
+and their current time "usertime").
+
+The task is to determine which active worlds the user is inside (within a world's radius
+and within the world's time period) based on the user's current location and time.
+Then, develop a system of ranking the worlds the user is in based on relevance between
+the "tags" string array associated with each world and the user "tags" string array.
+-->
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="utf-8">
+    <link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
+    <title>json</title>
+    <style>
+        body {
+            padding-top: 50px;
+        }
+    </style>
+</head>
+<body>
+    <div class="row">
+        <div class="col-md-1"></div>
+        <div class="col-md-4">
+            <table id="user" class="table table-bordered">
+                <tr>
+                    <th colspan="2">User Information</th>
+                </tr>
+                <tr>
+                    <td width="100">ID</td>
+                    <td id="id"></td>
+                </tr>
+                <tr>
+                    <td>Name</td>
+                    <td id="name"></td>
+                </tr>
+                <tr>
+                    <td>Tags</td>
+                    <td id="tags"></td>
+                </tr>
+                <tr>
+                    <td>Time</td>
+                    <td id="time"></td>
+                </tr>
+                <tr>
+                    <td>Location</td>
+                    <td id="location"></td>
+                </tr>
+            </table>
+        </div>
+        <div class="col-md-1"></div>
+        <div class="col-md-5"></div>
+        <div class="col-md-1"></div>
+    </div>
+
+    <script src="http://code.jquery.com/jquery-1.11.0.js"></script>
+    <script>
+        var user;
+        var user_lon;
+        var user_lat;
+        var user_time;
+        var user_tags;
+
+        $.getJSON("/user", function (data) {
+            user = data.user;
+            user_lon = user.userloc.coordinates[0];
+            user_lat = user.userloc.coordinates[1];
+            user_time = user.usertime;
+            user_tags = user.tags;
+            //user info display
+            $('#id').append(user.id.toString());
+            $('#name').append(user.name.toString());
+            $('#tags').append(user_tags.toString());
+            $('#time').append(user_time.toString());
+            $('#location').append(user_lon.toFixed(5).toString() + ',' + user_lat.toFixed(5).toString());
+        });
+
+        function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+            var R = 6371; // Radius of the earth in km
+            var dLat = deg2rad(lat2 - lat1);  // deg2rad below
+            var dLon = deg2rad(lon2 - lon1);
+            var a =
+              Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2)
+            ;
+            var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            var d = R * c; // Distance in km
+            return d;
+        }
+
+        function deg2rad(deg) {
+            return deg * (Math.PI / 180);
+        }
+
+        function isTimeValid(world_time_start, world_time_end) {
+            if (Date.parse(user_time) > Date.parse(world_time_start) && Date.parse(user_time) < Date.parse(world_time_end)) //world_start < user_time < world_end
+                return true;
+            else
+                return false;
+        }
+
+        function tag_matched(worlds_matched) {
+            for (var i = 0; i < worlds_matched.length; i++) {
+                worlds_matched[i].tags_matched = []; //add new property in worlds_match
+
+                worlds_matched[i].tags.sort(); //sort two arrays to find intersections
+                user_tags.sort();
+                var ai = 0, bi = 0;
+                while (ai < worlds_matched[i].tags.length && bi < user_tags.length) { //find array intersection, speed:O(n)
+                    if (worlds_matched[i].tags[ai] < user_tags[bi]) { ai++; }
+                    else if (worlds_matched[i].tags[ai] > user_tags[bi]) { bi++; }
+                    else /* they're equal */
+                    {
+                        worlds_matched[i].tags_matched.push(worlds_matched[i].tags[ai]);
+                        ai++;
+                        bi++;
+                    }
+                }
+            }
+        }
+        var worlds;
+        var world_lon;
+        var world_lat;
+        var world_radious;
+        var worlds_matched = []; // new array of active worlds filtered out
+
+        $.getJSON("/sample", function (data) {
+            worlds = data.data;
+            for (var i in worlds) {
+                // distance validation
+                var world_lon = worlds[i].loc.coordinates[0];
+                var world_lat = worlds[i].loc.coordinates[1];
+
+                world_radius = worlds[i].radius * 0.001; // make it in km.
+                distance = getDistanceFromLatLonInKm(user_lat, user_lon, world_lat, world_lon); //distance between the origin of the world and user location
+
+                if (world_radius > distance) { //distance validation
+                    if (worlds[i].time.timestart != undefined && worlds[i].time.timeend != undefined) { //if a time period exists
+
+                        if (isTimeValid(worlds[i].time.timestart, worlds[i].time.timeend)) { //time validation
+                            worlds_matched.push({
+                                id: worlds[i].id,
+                                tags: worlds[i].tags,
+                                radius: world_radius,
+                                dist: distance,
+                                timestart: worlds[i].time.timestart,
+                                timeend: worlds[i].time.timeend
+                            }); //save
+                        }
+                    } else {
+                        worlds_matched.push({ id: worlds[i].id, tags: worlds[i].tags, radius: world_radius, dist: distance }); //save
+                    }
+                }
+            }
+
+            tag_matched(worlds_matched); // matching tags save
+            worlds_matched.sort(function (left, right) { return right.tags_matched.length - left.tags_matched.length; }); //sorted by the number of maching tags
+
+            //print world_matched
+            for (var i in worlds_matched) {
+                if (worlds_matched[i].timestart) { //if a time period exists
+                    $('.col-md-5').append('<table class="table table-bordered"><th colspan="2">Rank ' + (Number(i) + 1) +
+                                 '</th><tr><td width="150">ID</td><td>' + worlds_matched[i].id +
+                                 '</td></tr><tr><td>Tags</td><td>' + worlds_matched[i].tags +
+                                 '</td></tr><tr><td>Matching Tags</td><td>' + worlds_matched[i].tags_matched + ' (<strong>' + worlds_matched[i].tags_matched.length +
+                                 '</strong>)</td></tr><tr><td>Radius(km)</td><td>' + (worlds_matched[i].radius).toFixed(3) +
+                                 '</td></tr><tr><td>Distance to User Location</td><td>' + (Number(worlds_matched[i].dist)).toFixed(3) +
+                                 '</td></tr><tr><td>Time Period</td><td>' + worlds_matched[i].timestart + ' ~ ' + worlds_matched[i].timeend + '</td></tr></table>');
+                } else {
+                    $('.col-md-5').append('<table class="table table-bordered"><th colspan="2">Rank ' + (Number(i) + 1) +
+                                 '</th><tr><td width="150">ID</td><td>' + worlds_matched[i].id +
+                                 '</td></tr><tr><td>Tags</td><td>' + worlds_matched[i].tags +
+                                 '</td></tr><tr><td>Matching Tags</td><td>' + worlds_matched[i].tags_matched + ' (<strong>' + worlds_matched[i].tags_matched.length +
+                                 '</strong>)</td></tr><tr><td>Radius(km)</td><td>' + (worlds_matched[i].radius).toFixed(3) +
+                                 '</td></tr><tr><td>Distance to User Location</td><td>' + (Number(worlds_matched[i].dist)).toFixed(3) + '</td></tr></table>');
+                }
+            }
+        });
+    </script>
+
+</body>
+</html>
